@@ -1,7 +1,7 @@
-import express  from 'express'
-import fs from 'fs'
-import path from'path'
-import cors from 'cors'
+import express  from 'express';
+import fs, { readFile, writeFile } from 'fs';
+import path from'path';
+import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { console } from 'inspector';
 
@@ -10,76 +10,132 @@ const __dirname = path.dirname(__filename); // get the name of the directory
 
 const app = express();
 const PORT = 3000;
-const ARCHIVO_DATOS = path.join(__dirname, 'canciones.json');
-console.log(__dirname);
+//const ARCHIVO_DATOS = path.join(__dirname, 'canciones.json');
+//console.log(__dirname); 
+//console.log(ARCHIVO_DATOS.toString);
 app.use(express.json());
 app.use(cors());
-app.get("/", (req, res) => {    
-    res.sendFile(path.join(__dirname,'index.html'));
-})
 
-const readData = () => {
+// GET /index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+  });
+
+const readData = async() => {
     try {
-        const data = fs.readFileSync(ARCHIVO_DATOS, 'utf-8');
-        return JSON.parse(data);
-    }
-    catch(error){
-        return [];
-    }
+        const fsResponse = readFile('canciones.json', 'utf-8');
+        const repertorio = JSON.parse(fsResponse);
+        console.log('Lectura de canciones.json exitosa.');
+        return repertorio;
+      } catch (error) {
+        console.log('Error al leer el archivo canciones.json.', error.message);
+        if (error.code === 'ENOENT') {
+          const newRepertorio = [];
+          writeFile('canciones.json', JSON.stringify(newRepertorio));
+          console.log('Se creó un nuevo archivo canciones.json.');
+          return newRepertorio;
+        }
+      }
 };
 
-const writeData = (data) => {
-    fs.writeFileSync(ARCHIVO_DATOS, JSON.stringify(data, null, 2), 'utf-8');
+const writeData = async(data) => {
+    try {
+        await writeFile('canciones.json', JSON.stringify(data));
+        console.log('Escritura de canciones.json exitosa.');
+      } catch (error) {
+        console.log('Error al escribir en el archivo canciones.json.', error.message);
+      }
 }
 
 //read
-app.get("/canciones", (req, res) => {   
+/* app.get("/canciones", (req, res) => {   
     console.log ('entro a get/canciones');
     const data = readData();
+    console.log(data.stringify);
+    res.json(data);
+}); */
+app.get("/canciones", async(req, res) => {       
+    const data = readFile("canciones.json");
     console.log(data.stringify);
     res.json(data);
 });
 
 //create
-app.post("/canciones", (req, res) =>{
-    const data = readData();
-    const newItem = req.body;
-    newItem.id = data.length ? data[data.length - 1].id + 1 : 1;
-    data.push(newItem);
-    writeData(data);
-    res.status(201).json(newItem);
-});
+app.post('/canciones', async (req, res) => {
+    const { id, titulo, artista, tono } = req.body;
+    const newCancion = { id, titulo, artista, tono };
+  
+    if ( !newCancion.titulo || !newCancion.artista || !newCancion.tono ) {
+      return res.status(401).json({
+        message: 'La canción no fue agregada por tener campos vacíos o incompletos.',
+      });
+      // return console.log('La canción no fue agregada por tener campos vacíos.');
+    }
+  
+    const repertorio = await readData();
+    const idExistente = repertorio.some((cancion) => cancion.id === newCancion.id);
+  
+    if (idExistente) {
+      return res.status(401).json({
+        message: 'La canción no fue agregada, el id ya existe.',
+      });
+      // return console.log('La canción no fue agregada, el id ya existe.');
+    }
+  
+    repertorio.push(newCancion);
+    await writeData(repertorio);
+  
+    res.status(201).json({
+      message: 'La canción fue agregada exitosamente.',
+      cancionAgregada: newCancion,
+    });
+  });
 
 //update
-app.put("/canciones/:id", (req, res) =>{
-    const data = readData();
-    const id = parseInt(req.params.id, 10);
-    const index = data.findIndex((item) => item.id === id);
-
-    if(index !== -1){
-        data[index] = { ...data[index], ...req.body };
-        writeData(data);
-        res.json(data[index]);
+app.put('/canciones/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { titulo, artista, tono } = req.body;
+  
+    if (!titulo || !artista || !tono ) {
+      return res.status(401).json({
+        message: 'La canción no puede tener campos vacíos o incompletos.',
+      });
+      // return console.log('La canción no puede tener campos vacíos.');
     }
-    else{
-        res.status(404).json({ error: 'Elemento no encontrado' });
+  
+    const repertorio = await readData();
+    const index = repertorio.findIndex((cancion) => cancion.id === id);
+  
+    if (index !== -1) {
+      repertorio[index] = { id, titulo, artista, tono };
+      await writeData(repertorio);
+      res.json({
+        message: 'La canción fue actualizada exitosamente.',
+      });
+    } else {
+      res.status(401).json({
+        message: 'No se encuentra el id de la canción.',
+      });
     }
-});
+  });
 
 //delete
-app.delete("/canciones/:id", (req, res) =>{
-    const data = readData();
-    const id = parseInt(req.params.id, 10);
-    const newData = data.filter((item) => item.id !== id);
-
-    if (newData.length !== data.length){
-        writeData(newData);
-        res.json({ message: 'Elemento eliminado'});
+app.delete('/canciones/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    const repertorio = await readData();
+    const newRepertorio = repertorio.filter((cancion) => cancion.id != id);
+  
+    if (repertorio.length != newRepertorio.length) {
+      await writeData(newRepertorio);
+      res.json({
+        message: 'La canción fue eliminada exitosamente',
+      });
+    } else {
+      res.status(401).json({
+        message: 'No se encuentra el id de la canción.',
+      });
     }
-    else{
-        res.status(404).json({ error: 'Elemento no encontrado' });
-    }
-});
+  });
 
 
 //search
